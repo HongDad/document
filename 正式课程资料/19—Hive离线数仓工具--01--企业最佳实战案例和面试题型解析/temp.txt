@@ -1,0 +1,180 @@
+CREATE TABLE student_complext_type(name STRING, favors ARRAY<STRING>, scores MAP<STRING, FLOAT>,address STRUCT<province:STRING, city:STRING, phone:STRING, zip:INT>)  ROW FORMAT DELIMITED  FIELDS TERMINATED BY '\t' COLLECTION ITEMS TERMINATED BY ';' MAP KEYS TERMINATED BY ':' ;
+
+
+
+SELECT cookieid, createtime, pv, RANK() OVER(PARTITION BY cookieid ORDER BY pv desc) AS rn1, DENSE_RANK() OVER(PARTITION BY cookieid ORDER BY pv desc) AS rn2, ROW_NUMBER() OVER(PARTITION BY cookieid ORDER BY pv DESC) AS rn3 FROM cookie2 WHERE cookieid = 'cookie1';
+
+
+B 2015-01 30
+B 2015-02 15
+B 2015-03 44
+
+
+A 2015-01 33
+A 2015-02 10
+A 2015-03 38
+
+转化：
+
+A 2015-01 33
+
+A 2015-01 33
+A 2015-02 10
+
+A 2015-01 33
+A 2015-02 10
+A 2015-03 38
+
+转化：
+
+   amonth          bmonth
+A 2015-01 33	A 2015-01
+
+A 2015-01 33	A 2015-02
+A 2015-02 10	A 2015-02
+
+A 2015-01 33	A 2015-03
+A 2015-02 10	A 2015-03
+A 2015-03 38	A 2015-03
+
+where amonth <= bmonth;
+
+转化：
+
+
+   amonth          bmonth 
+A 2015-01 33	A 2015-01
+A 2015-02 10	A 2015-01
+A 2015-03 38	A 2015-01
+
+A 2015-01 33	A 2015-02
+A 2015-02 10	A 2015-02
+A 2015-03 38	A 2015-02
+
+A 2015-01 33	A 2015-03
+A 2015-02 10	A 2015-03
+A 2015-03 38	A 2015-03
+
+由此课发现：2015-01 2015-02 2015-03 自己跟自己做了一个链接
+
+
+
+
+create database if not exists nx_hivedb;
+use nx_hivedb;
+drop table if exists nx_example1_raw;
+create table nx_example1_raw(name string, month string, pv int) row format delimited fields terminated by ",";
+load data local inpath "/home/bigdata/nx_example1_raw.txt" into table nx_example1_raw;
+select * from nx_example1_raw;
+
+
+create table nx_example1_ods as select name, month,  sum(pv) as tpv from nx_example1_raw group by name, month; 
+
+
+create table nx_example1_3 as select 
+a.name as aname, a.month as amonth, a.tpv as apv,
+b.name as bname, b.month as bmonth, b.tpv as bpv 
+from nx_example1_ods a join nx_example1_ods b 
+on a.name = b.name;
+
+
+select * from nx_example1_3 ;
+
+
+create table  nx_example1_4 as select bname, bmonth, bpv, sum(apv) as sumpv, max(apv) as maxpv from nx_example1_3 where amonth <= bmonth group by bname, bmonth, bpv;
+
+
+select * from nx_example1_4;
+
+
+
+
+create table nx_example1_5 as 
+select name, month, tpv, 
+sum(tpv) over (partition by name order by month rows between unbounded preceding and current row) as maxpv, 
+max(tpv) over (partition by name order by month rows between unbounded preceding and current row) as sumpv 
+from nx_example1_ods;
+
+
+1       huangxiaoming   45      a-c-d-f
+2       huangzitao      36      b-c-d-e
+3       huanglei        41      c-d-e
+4       liushishi       22      a-d-e
+5       liudehua        39      e-f-d
+6       liuyifei        35      a-d-e
+
+
+
+1       huangxiaoming   45      a-c-d-f
+
+1       huangxiaoming   45      a
+1       huangxiaoming   45      c
+1       huangxiaoming   45      d
+1       huangxiaoming   45      f
+
+explode()  炸裂 拆分
+
+array:  多行一列
+map：  多行两列
+
+
+create table exercise_topn_dw as 
+select a.id as id, a.name as name, a.age as age, 
+favor_view.f as favor 
+from exercise_topn a 
+LATERAL view explode(split(a.favors, "-")) favor_view as f;
+
+窗口函数：
+rank dense_rank row_number
+
+
+select a.id as id, a.name as name, a.age as age, a.favor as favor
+from (
+	select 
+	b.id as id, b.name as name, b.age as age, b.favor as favor,
+	row_number() over (partition by b.favor order by b.age desc) as rank 
+	from exercise_topn_dw b 
+) a where a.rank <= 2;
+
+exercise_topn_dw
+id name age favor  rank 
+
+
+
+table1: 每一行存储一个成绩信息
+id	sid	course	score
+1       1       yuwen   43
+2       1       shuxue  55
+3       2       yuwen   77
+4       2       shuxue  88
+5       3       yuwen   98
+6       3       shuxue  65
+7       3       yingyu  80
+
+转变SQL:
+create table exercise_course_result1 as 
+select 
+sid, 
+case course when "yuwen" then score else 0 end as yuwen,
+case course when "shuxue" then score else 0 end  as shuxue,
+case course when "yingyu" then score else 0 end  as yingyu
+from exercise_course;
+
+create table exercise_course_result2 as 
+select 
+sid, 
+max(case course when "yuwen" then score else 0 end) as yuwen,
+max(case course when "shuxue" then score else 0 end)  as shuxue,
+max(case course when "yingyu" then score else 0 end)  as yingyu
+from exercise_course group by sid;
+
+
+table2(exercise_course_result2)：每一列存储一个成绩信息
+sid	yuwen	shuxue	yingyu
+1	43	55	0
+2	77	88
+3	98	65	80
+
+select sid from exercise_course_result2 where yuwen < shuxue;
+
+行列转换：case...when..... 
